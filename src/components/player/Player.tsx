@@ -34,7 +34,11 @@ export function Player() {
   } = usePlayer();
 
   const audioRef = useRef<HTMLAudioElement>(null);
-  const fadeIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // REMOVED: Fade interval ref and constants
+  // const fadeIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  // const FADE_DURATION = 800;
+  // const FADE_STEPS = 20;
 
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -43,16 +47,10 @@ export function Player() {
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [showLyrics, setShowLyrics] = useState(false);
 
-  // Constants for Smooth Fade
-  const FADE_DURATION = 800;
-  const FADE_STEPS = 20;
-
   // --- 1. MEDIA SESSION API (LOCK SCREEN CONTROLS) ---
-  // This tells the mobile OS to keep the audio session alive in background
   useEffect(() => {
     if (!activeSong || !('mediaSession' in navigator)) return;
 
-    // A. Update Lock Screen Metadata
     navigator.mediaSession.metadata = new MediaMetadata({
       title: activeSong.name,
       artist: activeSong.artist.join(", "),
@@ -66,13 +64,11 @@ export function Player() {
       ]
     });
 
-    // B. Bind Lock Screen Events to Our Functions
     navigator.mediaSession.setActionHandler('play', () => setIsPlaying(true));
     navigator.mediaSession.setActionHandler('pause', () => setIsPlaying(false));
     navigator.mediaSession.setActionHandler('previoustrack', playPrevious);
     navigator.mediaSession.setActionHandler('nexttrack', playNext);
 
-    // Cleanup
     return () => {
         if ('mediaSession' in navigator) {
             navigator.mediaSession.setActionHandler('play', null);
@@ -84,74 +80,40 @@ export function Player() {
   }, [activeSong, setIsPlaying, playPrevious, playNext]);
 
 
-  // --- 2. AUDIO PLAYBACK LOGIC ---
+  // --- 2. AUDIO PLAYBACK LOGIC (SIMPLIFIED) ---
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !activeSong) return;
 
-    // Stop any running fades
-    if (fadeIntervalRef.current) clearInterval(fadeIntervalRef.current);
-
-    const stepTime = FADE_DURATION / FADE_STEPS;
-    const targetVolume = isMuted ? 0 : volume;
-    const volumeStep = targetVolume / FADE_STEPS;
+    // Apply volume settings immediately
+    audio.volume = isMuted ? 0 : volume;
 
     if (isPlaying) {
-      // If audio is paused, start it
-      if (audio.paused) {
-          audio.volume = 0;
-          const playPromise = audio.play();
-
-          if (playPromise !== undefined) {
-            playPromise.then(() => {
-              let currentFadeVol = 0;
-              fadeIntervalRef.current = setInterval(() => {
-                currentFadeVol += volumeStep;
-                if (currentFadeVol >= targetVolume) {
-                  audio.volume = targetVolume;
-                  if (fadeIntervalRef.current) clearInterval(fadeIntervalRef.current);
-                } else {
-                  audio.volume = currentFadeVol;
-                }
-              }, stepTime);
-            }).catch(err => {
-                console.error("Playback error:", err);
-                // If autoplay is blocked, we must revert state
-                // setIsPlaying(false);
-            });
-          }
-      } else {
-          // If already playing, just ensure volume is up (e.g. after seeking)
-          audio.volume = targetVolume;
+      // Simple play attempt
+      const playPromise = audio.play();
+      if (playPromise !== undefined) {
+        playPromise.catch(error => {
+          console.error("Playback failed (likely autoplay policy):", error);
+          // We DO NOT set isPlaying(false) here automatically, as it can cause UI flicker
+          // when switching songs rapidly. We let the user manually retry if needed.
+        });
       }
-
     } else {
-      // Fade Out Logic
-      let currentFadeVol = audio.volume;
-      fadeIntervalRef.current = setInterval(() => {
-        currentFadeVol -= volumeStep;
-        if (currentFadeVol <= 0) {
-          audio.volume = 0;
-          audio.pause();
-          if (fadeIntervalRef.current) clearInterval(fadeIntervalRef.current);
-          audio.volume = targetVolume; // Reset for next time
-        } else {
-          audio.volume = currentFadeVol;
-        }
-      }, stepTime);
+      audio.pause();
     }
-    return () => { if (fadeIntervalRef.current) clearInterval(fadeIntervalRef.current); };
-  }, [isPlaying, activeSong, volume, isMuted]);
+  }, [isPlaying, activeSong]);
+  // Removed 'volume' and 'isMuted' from dependency array to prevent play re-triggering on volume change.
+  // Volume is handled in a separate effect below.
 
-  // Sync Volume slider
+  // --- 3. SEPARATE VOLUME LOGIC ---
   useEffect(() => {
-    if (audioRef.current && !fadeIntervalRef.current) {
+    if (audioRef.current) {
       audioRef.current.volume = isMuted ? 0 : volume;
     }
   }, [volume, isMuted]);
 
 
-  // --- 3. EVENT HANDLERS ---
+  // --- 4. EVENT HANDLERS ---
   const onLoadedMetadata = () => { if (audioRef.current) setDuration(audioRef.current.duration); };
   const onTimeUpdate = () => { if (audioRef.current) setCurrentTime(audioRef.current.currentTime); };
 
@@ -172,13 +134,10 @@ export function Player() {
 
   return (
     <>
-      {/* UPDATED AUDIO TAG:
-          - autoPlay: Helps mobile browsers transition to next song automatically
-          - playsInline: Prevents iOS full-screen video player hijacks
-      */}
       <audio
         ref={audioRef}
         src={activeSong.fileUrl}
+        // IMPORTANT: autoPlay helps mobile browsers understand the intent when src changes
         autoPlay={isPlaying}
         playsInline
         onLoadedMetadata={onLoadedMetadata}
