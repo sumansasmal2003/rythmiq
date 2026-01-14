@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
 import dbConnect from "@/lib/db";
-import { Song as SongModel } from "@/models/Song"; // Ensure you have this model exported
+import Song from "@/models/Song"; // Ensure you have this model exported
 // If you don't have a separate model file, you might need to define the Schema here or export it from where you defined it.
 // Assuming you have a basic Mongoose model set up.
 
@@ -26,7 +26,7 @@ export async function GET(
     await dbConnect();
 
     // 2. Find the Real URL
-    const song = await mongoose.models.Song.findById(songId);
+    const song = await Song.findById(songId);
 
     if (!song || !song.fileUrl) {
       return new NextResponse("Song not found", { status: 404 });
