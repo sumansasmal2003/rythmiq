@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
 import dbConnect from "@/lib/db";
-import { Song as SongModel } from "@/models/Song"; // Ensure Song model is imported
+import Song from "@/models/Song"; // Ensure Song model is imported
 
 export async function GET(
   req: NextRequest,
@@ -23,7 +23,7 @@ export async function GET(
 
     // 2. Fetch Real URL from DB
     // (We use mongoose.models.Song to avoid recompilation errors)
-    const song = await mongoose.models.Song.findById(songId);
+    const song = await Song.findById(songId);
 
     if (!song || !song.coverUrl) {
       return new NextResponse("Image not found", { status: 404 });
