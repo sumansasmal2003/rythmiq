@@ -1,64 +1,50 @@
 import { NextResponse } from "next/server";
 import dbConnect from "@/lib/db";
-import Song from "@/models/Song";
-import { getPlaiceholder } from "plaiceholder";
+import mongoose from "mongoose";
 
-export async function POST(req: Request) {
+// Define Schema if not already in a separate file
+const SongSchema = new mongoose.Schema({
+  name: String,
+  artist: [String],
+  coverUrl: String,
+  fileUrl: String, // We keep this in DB, but won't send it to client
+  duration: Number,
+  mood: String,
+  createdAt: { type: Date, default: Date.now },
+});
+
+const Song = mongoose.models.Song || mongoose.model("Song", SongSchema);
+
+export async function GET() {
+  await dbConnect();
   try {
-    await dbConnect();
+    const songs = await Song.find({}).sort({ createdAt: -1 });
 
-    const body = await req.json();
+    // TRANSFORM DATA: Hide 'fileUrl', replace with proxy URL
+    const safeSongs = songs.map((song) => ({
+      _id: song._id,
+      name: song.name,
+      artist: song.artist,
+      coverUrl: `/api/cover/${song._id}`,
+      duration: song.duration,
+      mood: song.mood,
+      // The Magic: The frontend sees this, NOT the real dropbox/storage link
+      fileUrl: `/api/stream/${song._id}`,
+    }));
 
-    // 1. EXTRACT 'mood' HERE (It was missing in your file)
-    const { name, artist, coverUrl, fileUrl, duration, mood } = body;
-
-    if (!name || !artist || !fileUrl || !coverUrl) {
-      return NextResponse.json({ error: "Missing fields" }, { status: 400 });
-    }
-
-    let blurDataUrl = "";
-    try {
-      const buffer = await fetch(coverUrl).then(async (res) =>
-        Buffer.from(await res.arrayBuffer())
-      );
-      const { base64 } = await getPlaiceholder(buffer);
-      blurDataUrl = base64;
-    } catch (err) {
-      console.error("Failed to generate blur hash:", err);
-    }
-
-    const artistArray = Array.isArray(artist)
-      ? artist
-      : artist.split(',').map((a: string) => a.trim());
-
-    // 2. PASS 'mood' TO DATABASE
-    const newSong = await Song.create({
-      name,
-      artist: artistArray,
-      coverUrl,
-      fileUrl,
-      duration: Number(duration) || 0,
-      blurDataUrl,
-      mood: mood || "Chill", // <--- THIS WAS MISSING
-    });
-
-    return NextResponse.json(
-      { message: "Song added", song: newSong },
-      { status: 201 }
-    );
-
+    return NextResponse.json({ songs: safeSongs });
   } catch (error) {
-    console.error("Error adding song:", error);
-    return NextResponse.json({ error: "Server Error" }, { status: 500 });
+    return NextResponse.json({ error: "Failed to fetch songs" }, { status: 500 });
   }
 }
 
-export async function GET() {
+export async function POST(req: Request) {
+  await dbConnect();
   try {
-    await dbConnect();
-    const songs = await Song.find({}).sort({ createdAt: -1 });
-    return NextResponse.json({ songs }, { status: 200 });
+    const body = await req.json();
+    const song = await Song.create(body);
+    return NextResponse.json({ success: true, song }, { status: 201 });
   } catch (error) {
-    return NextResponse.json({ error: "Failed to fetch" }, { status: 500 });
+    return NextResponse.json({ error: "Failed to create song" }, { status: 500 });
   }
 }

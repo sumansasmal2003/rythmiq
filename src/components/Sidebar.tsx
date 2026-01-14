@@ -2,73 +2,55 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, PlusCircle, Settings, Library, X } from "lucide-react";
+import { Home, Library, PlusCircle, Settings, Music2, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const routes = [
-  { label: "Discover", icon: Home, href: "/" },
-  { label: "Library", icon: Library, href: "/library" },
-  { label: "Upload Music", icon: PlusCircle, href: "/upload" },
-];
-
-interface SidebarProps {
-  mobile?: boolean;
-  onClose?: () => void;
-}
-
-export function Sidebar({ mobile, onClose }: SidebarProps) {
+export function Sidebar() {
   const pathname = usePathname();
 
+  const routes = [
+    { label: "Home", icon: Home, href: "/" },
+    { label: "Search", icon: Search, href: "/search" },
+    { label: "Library", icon: Library, href: "/library" },
+    { label: "Upload Track", icon: PlusCircle, href: "/upload" },
+    { label: "Settings", icon: Settings, href: "/settings" },
+  ];
+
   return (
-    <div className={cn(
-      "flex flex-col h-full bg-white border-r border-gray-200",
-      mobile ? "w-full border-none" : "w-64" // Full width inside mobile drawer
-    )}>
-      {/* Logo Area (Only show on desktop sidebar, mobile header handles it) */}
-      {!mobile && (
-        <div className="px-6 py-8">
-          <h1 className="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-purple-600">
-            Rythmiq.
-          </h1>
-        </div>
-      )}
+    <div className="h-full bg-white border-r border-gray-100 flex flex-col w-64">
 
-      {/* Close Button for Mobile */}
-      {mobile && (
-        <div className="flex justify-end p-4">
-            <button onClick={onClose} className="p-2 text-gray-500 hover:bg-gray-100 rounded-full">
-                <X size={20} />
-            </button>
+      {/* Logo Area */}
+      <div className="p-6 flex items-center gap-3">
+        <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white shadow-indigo-200 shadow-lg">
+          <Music2 size={24} />
         </div>
-      )}
-
-      {/* Navigation */}
-      <div className="flex-1 flex flex-col w-full px-3 gap-1 mt-4 md:mt-0">
-        {routes.map((route) => (
-          <Link
-            key={route.href}
-            href={route.href}
-            onClick={onClose} // Close sidebar on click (mobile only)
-            className={cn(
-              "flex items-center gap-x-3 px-4 py-3 text-sm font-medium rounded-lg transition-colors",
-              pathname === route.href
-                ? "bg-indigo-50 text-indigo-600"
-                : "text-gray-500 hover:text-gray-900 hover:bg-gray-50"
-            )}
-          >
-            <route.icon size={20} />
-            {route.label}
-          </Link>
-        ))}
+        <span className="text-2xl font-bold text-gray-900 tracking-tight">Rythmiq</span>
       </div>
 
-      {/* Settings Footer */}
-      <div className="p-4 border-t border-gray-100 mt-auto">
-        <button className="flex items-center gap-x-3 px-4 py-3 text-sm font-medium text-gray-500 hover:text-gray-900 w-full rounded-lg hover:bg-gray-50 transition-colors">
-          <Settings size={20} />
-          Settings
-        </button>
+      {/* Nav Links */}
+      <div className="flex-1 px-4 py-4 space-y-2">
+        <div className="text-xs font-bold text-gray-400 uppercase tracking-wider px-4 mb-2">Menu</div>
+        {routes.map((route) => {
+          const isActive = pathname === route.href;
+          return (
+            <Link
+              key={route.href}
+              href={route.href}
+              className={cn(
+                "flex items-center gap-3 px-4 py-3 text-sm font-semibold rounded-xl transition-all duration-200",
+                isActive
+                  ? "bg-indigo-50 text-indigo-600 shadow-sm"
+                  : "text-gray-500 hover:bg-gray-50 hover:text-gray-900"
+              )}
+            >
+              <route.icon size={20} className={isActive ? "text-indigo-600" : "text-gray-400"} />
+              {route.label}
+            </Link>
+          );
+        })}
       </div>
+
+      {/* Account Section Removed as requested */}
     </div>
   );
 }

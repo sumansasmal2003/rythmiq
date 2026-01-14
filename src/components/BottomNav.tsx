@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Library, PlusCircle, User } from "lucide-react";
+import { Home, Library, PlusCircle, Settings, Search } from "lucide-react"; // Import Settings
 import { cn } from "@/lib/utils";
 
 export function BottomNav() {
@@ -10,9 +10,10 @@ export function BottomNav() {
 
   const routes = [
     { label: "Home", icon: Home, href: "/" },
+    { label: "Search", icon: Search, href: "/search" },
     { label: "Library", icon: Library, href: "/library" },
     { label: "Upload", icon: PlusCircle, href: "/upload" },
-    // { label: "Profile", icon: User, href: "/profile" }, // Add later if needed
+    { label: "Settings", icon: Settings, href: "/settings" }, // <--- Added this
   ];
 
   return (
@@ -30,7 +31,7 @@ export function BottomNav() {
           >
             <route.icon
                 size={24}
-                fill={isActive ? "currentColor" : "none"}
+                fill={isActive && route.label !== 'Settings' ? "currentColor" : "none"}
                 className={isActive ? "scale-110 transition-transform" : ""}
             />
             <span className="text-[10px] font-medium">{route.label}</span>

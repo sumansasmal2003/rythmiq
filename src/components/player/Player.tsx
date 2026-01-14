@@ -3,9 +3,22 @@
 import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import { usePlayer } from "@/lib/store";
-import { Play, Pause, SkipBack, SkipForward, Volume2, VolumeX, X, ListMusic } from "lucide-react";
+import {
+  Play,
+  Pause,
+  SkipBack,
+  SkipForward,
+  Volume2,
+  VolumeX,
+  X,
+  ListMusic,
+  Maximize2,
+  ChevronDown,
+  Mic2
+} from "lucide-react";
 import { formatDuration } from "@/lib/utils";
 import { ArtistList } from "@/components/ArtistList";
+import { LyricsPanel } from "@/components/LyricsPanel";
 
 export function Player() {
   const {
@@ -15,7 +28,9 @@ export function Player() {
     playNext,
     playPrevious,
     toggleQueue,
-    isQueueOpen
+    isQueueOpen,
+    queue,
+    playSmart
   } = usePlayer();
 
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -25,17 +40,56 @@ export function Player() {
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
   const [isMuted, setIsMuted] = useState(false);
+  const [isFullScreen, setIsFullScreen] = useState(false);
+  const [showLyrics, setShowLyrics] = useState(false);
 
   // Constants for Smooth Fade
-  const FADE_DURATION = 800; // ms
+  const FADE_DURATION = 800;
   const FADE_STEPS = 20;
 
-  // 1. COMPLEX PLAY/PAUSE LOGIC (Smooth Fade)
+  // --- 1. MEDIA SESSION API (LOCK SCREEN CONTROLS) ---
+  // This tells the mobile OS to keep the audio session alive in background
+  useEffect(() => {
+    if (!activeSong || !('mediaSession' in navigator)) return;
+
+    // A. Update Lock Screen Metadata
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: activeSong.name,
+      artist: activeSong.artist.join(", "),
+      artwork: [
+        { src: activeSong.coverUrl, sizes: '96x96', type: 'image/jpeg' },
+        { src: activeSong.coverUrl, sizes: '128x128', type: 'image/jpeg' },
+        { src: activeSong.coverUrl, sizes: '192x192', type: 'image/jpeg' },
+        { src: activeSong.coverUrl, sizes: '256x256', type: 'image/jpeg' },
+        { src: activeSong.coverUrl, sizes: '384x384', type: 'image/jpeg' },
+        { src: activeSong.coverUrl, sizes: '512x512', type: 'image/jpeg' },
+      ]
+    });
+
+    // B. Bind Lock Screen Events to Our Functions
+    navigator.mediaSession.setActionHandler('play', () => setIsPlaying(true));
+    navigator.mediaSession.setActionHandler('pause', () => setIsPlaying(false));
+    navigator.mediaSession.setActionHandler('previoustrack', playPrevious);
+    navigator.mediaSession.setActionHandler('nexttrack', playNext);
+
+    // Cleanup
+    return () => {
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.setActionHandler('play', null);
+            navigator.mediaSession.setActionHandler('pause', null);
+            navigator.mediaSession.setActionHandler('previoustrack', null);
+            navigator.mediaSession.setActionHandler('nexttrack', null);
+        }
+    };
+  }, [activeSong, setIsPlaying, playPrevious, playNext]);
+
+
+  // --- 2. AUDIO PLAYBACK LOGIC ---
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !activeSong) return;
 
-    // Clear any active fades to prevent conflicts
+    // Stop any running fades
     if (fadeIntervalRef.current) clearInterval(fadeIntervalRef.current);
 
     const stepTime = FADE_DURATION / FADE_STEPS;
@@ -43,73 +97,67 @@ export function Player() {
     const volumeStep = targetVolume / FADE_STEPS;
 
     if (isPlaying) {
-      // --- FADE IN ---
-      audio.volume = 0;
-      const playPromise = audio.play();
+      // If audio is paused, start it
+      if (audio.paused) {
+          audio.volume = 0;
+          const playPromise = audio.play();
 
-      if (playPromise !== undefined) {
-        playPromise.then(() => {
-          let currentFadeVol = 0;
-          fadeIntervalRef.current = setInterval(() => {
-            currentFadeVol += volumeStep;
-
-            if (currentFadeVol >= targetVolume) {
-              audio.volume = targetVolume;
-              if (fadeIntervalRef.current) clearInterval(fadeIntervalRef.current);
-            } else {
-              audio.volume = currentFadeVol;
-            }
-          }, stepTime);
-        }).catch(err => console.error("Playback error:", err));
+          if (playPromise !== undefined) {
+            playPromise.then(() => {
+              let currentFadeVol = 0;
+              fadeIntervalRef.current = setInterval(() => {
+                currentFadeVol += volumeStep;
+                if (currentFadeVol >= targetVolume) {
+                  audio.volume = targetVolume;
+                  if (fadeIntervalRef.current) clearInterval(fadeIntervalRef.current);
+                } else {
+                  audio.volume = currentFadeVol;
+                }
+              }, stepTime);
+            }).catch(err => {
+                console.error("Playback error:", err);
+                // If autoplay is blocked, we must revert state
+                // setIsPlaying(false);
+            });
+          }
+      } else {
+          // If already playing, just ensure volume is up (e.g. after seeking)
+          audio.volume = targetVolume;
       }
 
     } else {
-      // --- FADE OUT ---
+      // Fade Out Logic
       let currentFadeVol = audio.volume;
-
       fadeIntervalRef.current = setInterval(() => {
         currentFadeVol -= volumeStep;
-
         if (currentFadeVol <= 0) {
           audio.volume = 0;
           audio.pause();
           if (fadeIntervalRef.current) clearInterval(fadeIntervalRef.current);
-
-          // Reset volume for next play
-          audio.volume = targetVolume;
+          audio.volume = targetVolume; // Reset for next time
         } else {
           audio.volume = currentFadeVol;
         }
       }, stepTime);
     }
-
-    return () => {
-      if (fadeIntervalRef.current) clearInterval(fadeIntervalRef.current);
-    };
+    return () => { if (fadeIntervalRef.current) clearInterval(fadeIntervalRef.current); };
   }, [isPlaying, activeSong, volume, isMuted]);
 
-  // 2. Handle Volume Updates (When dragging slider)
+  // Sync Volume slider
   useEffect(() => {
     if (audioRef.current && !fadeIntervalRef.current) {
       audioRef.current.volume = isMuted ? 0 : volume;
     }
   }, [volume, isMuted]);
 
-  // Standard Audio Events
-  const onLoadedMetadata = () => {
-    if (audioRef.current) setDuration(audioRef.current.duration);
-  };
 
-  const onTimeUpdate = () => {
-    if (audioRef.current) setCurrentTime(audioRef.current.currentTime);
-  };
+  // --- 3. EVENT HANDLERS ---
+  const onLoadedMetadata = () => { if (audioRef.current) setDuration(audioRef.current.duration); };
+  const onTimeUpdate = () => { if (audioRef.current) setCurrentTime(audioRef.current.currentTime); };
 
   const handleSeek = (e: React.ChangeEvent<HTMLInputElement>) => {
     const time = Number(e.target.value);
-    if (audioRef.current) {
-      audioRef.current.currentTime = time;
-      setCurrentTime(time);
-    }
+    if (audioRef.current) { audioRef.current.currentTime = time; setCurrentTime(time); }
   };
 
   const handleVolumeChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -118,125 +166,252 @@ export function Player() {
     if (val > 0) setIsMuted(false);
   };
 
-  const toggleMute = () => {
-    setIsMuted(!isMuted);
-  };
+  const toggleMute = () => setIsMuted(!isMuted);
 
   if (!activeSong) return null;
 
   return (
-    <div className="fixed bottom-16 md:bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t border-gray-200 py-2 md:py-3 px-4 md:px-8 z-50 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] transition-all animate-in slide-in-from-bottom-10 duration-500">
-
+    <>
+      {/* UPDATED AUDIO TAG:
+          - autoPlay: Helps mobile browsers transition to next song automatically
+          - playsInline: Prevents iOS full-screen video player hijacks
+      */}
       <audio
         ref={audioRef}
         src={activeSong.fileUrl}
+        autoPlay={isPlaying}
+        playsInline
         onLoadedMetadata={onLoadedMetadata}
         onTimeUpdate={onTimeUpdate}
         onEnded={playNext}
       />
 
-      <div className="max-w-7xl mx-auto flex items-center justify-between gap-4">
+      <LyricsPanel isOpen={showLyrics} onClose={() => setShowLyrics(false)} />
 
-        {/* Left: Song Info */}
-        <div className="flex items-center gap-4 w-1/3 min-w-[120px]">
-          <div className={`relative w-12 h-12 md:w-14 md:h-14 rounded-lg overflow-hidden shadow-md border border-gray-100 group transition-all duration-500 ${isPlaying ? "shadow-indigo-500/20" : ""}`}>
-             <Image
-              src={activeSong.coverUrl}
-              alt={activeSong.name}
-              fill
-              className={`object-cover transition-transform duration-[3000ms] ease-linear ${isPlaying ? "scale-110" : "scale-100"}`}
-            />
+      {/* FULL SCREEN OVERLAY */}
+      {isFullScreen && (
+        <div className="fixed inset-0 z-[100] bg-white flex flex-col animate-in slide-in-from-bottom-full duration-300">
+
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+             <button onClick={() => setIsFullScreen(false)} className="p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-full">
+                <ChevronDown size={28} />
+             </button>
+             <span className="text-sm font-bold text-gray-500 uppercase tracking-widest">Now Playing</span>
+             <button
+                onClick={() => setShowLyrics(!showLyrics)}
+                className={`p-2 rounded-full transition-colors ${showLyrics ? "bg-indigo-50 text-indigo-600" : "text-gray-500 hover:bg-gray-100"}`}
+             >
+                <Mic2 size={24} />
+             </button>
           </div>
-          <div className="hidden md:block overflow-hidden">
-            <h4 className="font-bold text-gray-900 truncate text-sm leading-tight">{activeSong.name}</h4>
-            <div className="text-xs text-gray-500 truncate font-medium mt-0.5">
-              <ArtistList artists={activeSong.artist} />
+
+          <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
+             <div className="flex-1 flex flex-col items-center justify-center p-8 md:border-r border-gray-100 bg-gray-50/30">
+                <div className="relative w-full max-w-sm aspect-square shadow-2xl rounded-2xl overflow-hidden mb-8">
+                   <Image
+                     src={activeSong.coverUrl}
+                     alt={activeSong.name}
+                     fill
+                     className="object-cover"
+                     unoptimized
+                   />
+                </div>
+                <div className="text-center space-y-2">
+                   <h2 className="text-3xl md:text-4xl font-black text-gray-900 leading-tight">{activeSong.name}</h2>
+                   <div className="text-lg md:text-xl text-gray-500 font-medium">
+                       <ArtistList artists={activeSong.artist} />
+                   </div>
+                </div>
+             </div>
+
+             <div className="flex-1 flex flex-col bg-white h-full overflow-hidden">
+                <div className="p-4 md:p-6 border-b border-gray-100">
+                    <h3 className="font-bold text-gray-900 flex items-center gap-2">
+                        <ListMusic size={20} className="text-indigo-600"/> Up Next
+                    </h3>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-1">
+                    {queue.map((song, i) => (
+                        <div
+                            key={i}
+                            onClick={() => playSmart(song)}
+                            className={`flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-colors
+                                ${activeSong._id === song._id ? "bg-indigo-50 border border-indigo-100" : "hover:bg-gray-50"}
+                            `}
+                        >
+                             <div className="relative w-10 h-10 rounded-lg overflow-hidden flex-shrink-0">
+                                <Image src={song.coverUrl} alt={song.name} fill className="object-cover" unoptimized />
+                                {activeSong._id === song._id && isPlaying && (
+                                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                                        <div className="w-1 h-3 bg-white mx-0.5 animate-bounce" />
+                                        <div className="w-1 h-3 bg-white mx-0.5 animate-bounce [animation-delay:0.1s]" />
+                                    </div>
+                                )}
+                             </div>
+                             <div className="min-w-0">
+                                 <h4 className={`text-sm font-bold truncate ${activeSong._id === song._id ? "text-indigo-600" : "text-gray-900"}`}>{song.name}</h4>
+                                 <p className="text-xs text-gray-500 truncate">{song.artist.join(", ")}</p>
+                             </div>
+                        </div>
+                    ))}
+                </div>
+             </div>
           </div>
+
+          <div className="px-6 py-6 md:px-12 md:py-8 bg-white border-t border-gray-100">
+             <div className="flex items-center gap-3 text-xs font-bold text-gray-400 mb-6">
+                <span className="w-10 text-right">{formatDuration(currentTime)}</span>
+                <input
+                    type="range"
+                    min={0}
+                    max={duration || 100}
+                    value={currentTime}
+                    onChange={handleSeek}
+                    className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-indigo-600 hover:accent-indigo-700 transition-all"
+                />
+                <span className="w-10">{formatDuration(duration)}</span>
+             </div>
+
+             <div className="flex items-center justify-center gap-10">
+                 <button onClick={playPrevious} className="p-4 rounded-full hover:bg-gray-100 text-gray-900 transition-all active:scale-95">
+                    <SkipBack size={32} fill="currentColor" />
+                 </button>
+                 <button
+                    onClick={() => setIsPlaying(!isPlaying)}
+                    className="w-20 h-20 bg-indigo-600 text-white rounded-full flex items-center justify-center shadow-xl shadow-indigo-300 hover:scale-105 active:scale-95 transition-all"
+                 >
+                    {isPlaying ? <Pause size={36} fill="currentColor" /> : <Play size={36} fill="currentColor" className="ml-1" />}
+                 </button>
+                 <button onClick={playNext} className="p-4 rounded-full hover:bg-gray-100 text-gray-900 transition-all active:scale-95">
+                    <SkipForward size={32} fill="currentColor" />
+                 </button>
+             </div>
           </div>
         </div>
+      )}
 
-        {/* Center: Controls */}
-        <div className="flex flex-col items-center gap-2 flex-1 max-w-md">
-          <div className="flex items-center gap-4 md:gap-6">
-            <button
-                onClick={playPrevious}
-                className="text-gray-400 hover:text-gray-900 transition-colors hover:scale-110 active:scale-95"
-            >
-              <SkipBack size={22} fill="currentColor" />
-            </button>
 
-            <button
-              onClick={() => setIsPlaying(!isPlaying)}
-              className="w-10 h-10 md:w-12 md:h-12 bg-gray-900 text-white rounded-full flex items-center justify-center hover:scale-105 hover:bg-black active:scale-95 transition-all shadow-xl shadow-indigo-500/20"
-            >
-              {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-1" />}
-            </button>
-
-            <button
-                onClick={playNext}
-                className="text-gray-400 hover:text-gray-900 transition-colors hover:scale-110 active:scale-95"
-            >
-              <SkipForward size={22} fill="currentColor" />
-            </button>
-          </div>
-
-          {/* Progress Bar (Hidden on very small screens, visible on md) */}
-          <div className="w-full flex items-center gap-2 text-xs text-gray-400 font-medium group">
-            <span className="w-10 text-right tabular-nums">{formatDuration(currentTime)}</span>
+      {/* MINI PLAYER (Bottom Bar) */}
+      <div
+        className={`fixed bottom-16 md:bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t border-gray-200 z-50 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] transition-all duration-500
+            ${isFullScreen ? "translate-y-full opacity-0 pointer-events-none" : "translate-y-0 opacity-100"}
+        `}
+      >
+        <div className="absolute top-0 left-0 right-0 h-1 group cursor-pointer">
+            <div className="absolute inset-0 bg-gray-200" />
+            <div
+                className="absolute top-0 left-0 h-full bg-indigo-600 transition-all duration-100 ease-linear"
+                style={{ width: `${(currentTime / duration) * 100}%` }}
+            />
             <input
               type="range"
               min={0}
               max={duration || 100}
               value={currentTime}
               onChange={handleSeek}
-              className="flex-1 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-indigo-600 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:shadow-sm hover:[&::-webkit-slider-thumb]:scale-125 transition-all"
+              className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
             />
-            <span className="w-10 tabular-nums">{formatDuration(duration)}</span>
+        </div>
+
+        <div className="max-w-7xl mx-auto py-2 md:py-3 px-4 md:px-8 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4 w-1/3 min-w-[120px]">
+            <div
+                onClick={() => setIsFullScreen(true)}
+                className="relative w-12 h-12 md:w-14 md:h-14 rounded-lg overflow-hidden shadow-md border border-gray-100 cursor-pointer group"
+            >
+               <Image
+                src={activeSong.coverUrl}
+                alt={activeSong.name}
+                fill
+                className="object-cover group-hover:scale-110 transition-transform duration-500"
+                unoptimized
+              />
+            </div>
+            <div className="hidden md:block overflow-hidden">
+              <h4 className="font-bold text-gray-900 truncate text-sm leading-tight">{activeSong.name}</h4>
+              <div className="text-xs text-gray-500 truncate font-medium mt-0.5">
+                <ArtistList artists={activeSong.artist} />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-col items-center gap-2 flex-1 max-w-md">
+            <div className="flex items-center gap-4 md:gap-6">
+              <button
+                  onClick={playPrevious}
+                  className="text-gray-400 hover:text-gray-900 transition-colors hover:scale-110 active:scale-95"
+              >
+                <SkipBack size={22} fill="currentColor" />
+              </button>
+
+              <button
+                onClick={() => setIsPlaying(!isPlaying)}
+                className="w-10 h-10 md:w-12 md:h-12 bg-gray-900 text-white rounded-full flex items-center justify-center hover:scale-105 hover:bg-black active:scale-95 transition-all shadow-xl shadow-indigo-500/20"
+              >
+                {isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" className="ml-1" />}
+              </button>
+
+              <button
+                  onClick={playNext}
+                  className="text-gray-400 hover:text-gray-900 transition-colors hover:scale-110 active:scale-95"
+              >
+                <SkipForward size={22} fill="currentColor" />
+              </button>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-3 w-1/3 min-w-[120px] group">
+              <button
+                  onClick={() => setShowLyrics(!showLyrics)}
+                  className={`hidden md:block p-2 rounded-full transition-all ${showLyrics ? "bg-indigo-50 text-indigo-600" : "text-gray-400 hover:text-gray-900 hover:bg-gray-100"}`}
+                  title="Lyrics"
+              >
+                  <Mic2 size={20} />
+              </button>
+
+              <button
+                  onClick={toggleQueue}
+                  className={`hidden md:block p-2 rounded-full transition-all ${isQueueOpen ? "bg-indigo-50 text-indigo-600" : "text-gray-400 hover:text-gray-900 hover:bg-gray-100"}`}
+                  title="View Queue"
+              >
+                  <ListMusic size={20} />
+              </button>
+
+              <div className="h-6 w-px bg-gray-200 hidden md:block mx-1" />
+
+              <button onClick={toggleMute} className="text-gray-400 hover:text-gray-900 transition-colors">
+                  {isMuted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
+              </button>
+
+              <div className="w-24 hidden md:block">
+                  <input
+                      type="range"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={isMuted ? 0 : volume}
+                      onChange={handleVolumeChange}
+                      className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                  />
+              </div>
+
+              <button
+                  onClick={() => setIsFullScreen(true)}
+                  className="hidden md:block p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-all"
+                  title="Full Screen Player"
+              >
+                  <Maximize2 size={20} />
+              </button>
+
+              <button
+                  onClick={() => setIsPlaying(false)}
+                  className="md:hidden text-gray-400 ml-2"
+              >
+                  <X size={20} />
+              </button>
           </div>
         </div>
-
-        {/* Right: Volume & Queue */}
-        <div className="flex items-center justify-end gap-3 w-1/3 min-w-[120px] group">
-
-            {/* NEW: Queue Toggle Button */}
-            <button
-                onClick={toggleQueue}
-                className={`hidden md:block p-2 rounded-full transition-all ${isQueueOpen ? "bg-indigo-50 text-indigo-600" : "text-gray-400 hover:text-gray-900 hover:bg-gray-100"}`}
-                title="View Queue"
-            >
-                <ListMusic size={20} />
-            </button>
-
-            <div className="h-6 w-px bg-gray-200 hidden md:block" />
-
-            {/* Mute Button */}
-            <button onClick={toggleMute} className="text-gray-400 hover:text-gray-900 transition-colors">
-                {isMuted || volume === 0 ? <VolumeX size={20} /> : <Volume2 size={20} />}
-            </button>
-
-            {/* Volume Slider */}
-            <div className="w-24 hidden md:block">
-                <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={isMuted ? 0 : volume}
-                    onChange={handleVolumeChange}
-                    className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:bg-gray-400 [&::-webkit-slider-thumb]:rounded-full hover:[&::-webkit-slider-thumb]:bg-gray-600 transition-all"
-                />
-            </div>
-
-            {/* Close Button (Mobile Only) */}
-            <button
-                onClick={() => setIsPlaying(false)}
-                className="md:hidden text-gray-400 ml-2"
-            >
-                <X size={20} />
-            </button>
-        </div>
-
       </div>
-    </div>
+    </>
   );
 }

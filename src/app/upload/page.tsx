@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Upload, Music, Image as ImageIcon, CheckCircle, Disc, Loader2 } from "lucide-react";
+import { Upload, Music, Image as ImageIcon, CheckCircle, Disc, Loader2, ChevronDown } from "lucide-react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
 
@@ -121,7 +121,8 @@ export default function UploadPage() {
   };
 
   return (
-    <div className="h-full w-full flex flex-col items-center justify-center p-4">
+    // CHANGED: Removed h-full, added min-h-full and massive bottom padding (pb-40) to clear the player
+    <div className="min-h-full w-full flex flex-col items-center justify-center p-4 pb-32 md:pb-48">
 
       <div className="w-full max-w-3xl animate-in fade-in zoom-in duration-500">
 
@@ -178,7 +179,7 @@ export default function UploadPage() {
               </div>
             </div>
 
-            {/* NEW: Mood Selection Buttons */}
+            {/* Row 2: Mood Selection Buttons */}
             <div className="space-y-2">
                 <label className="text-xs font-bold uppercase text-gray-500 tracking-wider">Vibe / Mood</label>
                 <div className="flex flex-wrap gap-2">
