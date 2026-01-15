@@ -15,7 +15,7 @@ export async function GET(
     const host = req.headers.get("host") || "";
 
     // If the request didn't come from your site, block it.
-    if (!referer.includes(host)) {
+    if (referer && !referer.includes(host)) {
        return new NextResponse("Forbidden", { status: 403 });
     }
 
