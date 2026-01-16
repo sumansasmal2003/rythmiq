@@ -1,13 +1,46 @@
 "use client";
 
 import { useState } from "react";
-import { Upload, Music, Image as ImageIcon, CheckCircle, Disc, Loader2, ChevronDown } from "lucide-react";
+import {
+  Upload,
+  Music,
+  Image as ImageIcon,
+  CheckCircle,
+  Disc,
+  Loader2,
+  Database,
+  Search
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import toast from "react-hot-toast";
+
+// --- FIREBASE CONFIGURATION ---
+import { initializeApp, getApps, getApp } from "firebase/app";
+import { getDatabase, ref, get, child } from "firebase/database";
+
+const firebaseConfig = {
+    apiKey: "AIzaSyBoN7-NIr8dcul14ynlaOd1eax5NKZSD4Q",
+    authDomain: "musicpro-d3cac.firebaseapp.com",
+    databaseURL: "https://musicpro-d3cac-default-rtdb.firebaseio.com",
+    projectId: "musicpro-d3cac",
+    storageBucket: "musicpro-d3cac.appspot.com",
+    messagingSenderId: "586015387547",
+    appId: "1:586015387547:web:846adf849b2e11c3d97b3e",
+    measurementId: "G-08NKNB9FV5"
+};
+
+// Initialize Firebase (Singleton pattern to avoid re-init errors in Next.js)
+const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
+const db = getDatabase(app);
 
 export default function UploadPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
+
+  // New State for Firebase Import
+  const [firebaseId, setFirebaseId] = useState("");
+  const [fetchingId, setFetchingId] = useState(false);
+
   const [duration, setDuration] = useState(0);
   const [progress, setProgress] = useState(0); // 0 to 100
   const [status, setStatus] = useState<"idle" | "validating" | "ready">("idle");
@@ -22,10 +55,55 @@ export default function UploadPage() {
 
   const moods = ["Happy", "Sad", "Chill", "Party", "Focus", "Workout", "Romantic"];
 
-  // Handle URL Paste & Calculate Duration
-  const handleFileUrlChange = (url: string) => {
-    setFormData({ ...formData, fileUrl: url });
+  // --- FETCH FROM FIREBASE FUNCTION ---
+  const handleFetchFromFirebase = async () => {
+    if (!firebaseId.trim()) {
+        toast.error("Please enter a Music ID");
+        return;
+    }
 
+    setFetchingId(true);
+
+    // FIX 1: Point strictly to the 'musics' node where your React app saves data
+    const dbRef = ref(db);
+
+    try {
+        // Fetch the specific child: musics/{firebaseId}
+        const snapshot = await get(child(dbRef, `musics/${firebaseId}`));
+
+        if (snapshot.exists()) {
+            const data = snapshot.val();
+
+            // FIX 2: Map the fields exactly as they appear in your React App Database
+            // React App uses: musicName, artist, musicImage, musicFile
+            const newFormData = {
+                name: data.musicName || data.name || data.title || "",
+                artist: data.artist || data.singer || "",
+                coverUrl: data.musicImage || data.coverUrl || data.image || "",
+                fileUrl: data.musicFile || data.fileUrl || data.url || "",
+                mood: formData.mood // Keep default or existing mood
+            };
+
+            setFormData(newFormData);
+            toast.success("Data fetched successfully!", { icon: "🔥" });
+
+            // Trigger Audio Validation immediately if URL exists
+            if (newFormData.fileUrl) {
+                validateAudio(newFormData.fileUrl);
+            }
+        } else {
+            toast.error("No music found with this ID");
+        }
+    } catch (error) {
+        console.error(error);
+        toast.error("Failed to fetch from Firebase");
+    } finally {
+        setFetchingId(false);
+    }
+  };
+
+  // Helper to validate audio
+  const validateAudio = (url: string) => {
     if (!url) {
         setStatus("idle");
         return;
@@ -42,7 +120,7 @@ export default function UploadPage() {
       } else {
           setDuration(audio.duration);
           setStatus("ready");
-          toast.success("Audio metadata loaded!", { id: "audio-meta" });
+          toast.success("Audio ready!", { id: "audio-meta" });
       }
     };
 
@@ -52,6 +130,12 @@ export default function UploadPage() {
         toast.error("Invalid audio URL or format.");
       }
     };
+  };
+
+  // Handle URL Paste manually
+  const handleFileUrlChange = (url: string) => {
+    setFormData((prev) => ({ ...prev, fileUrl: url }));
+    validateAudio(url);
   };
 
   const simulateProgress = () => {
@@ -79,6 +163,7 @@ export default function UploadPage() {
     const progressInterval = simulateProgress();
 
     try {
+      // NOTE: Ensure your API route handles this POST request correctly
       const res = await fetch("/api/songs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -99,8 +184,9 @@ export default function UploadPage() {
                 artist: "",
                 coverUrl: "",
                 fileUrl: "",
-                mood: "Chill", // Reset mood as well
+                mood: "Chill",
             });
+            setFirebaseId(""); // Reset ID input
             setStatus("idle");
             setDuration(0);
             setProgress(0);
@@ -121,7 +207,6 @@ export default function UploadPage() {
   };
 
   return (
-    // CHANGED: Removed h-full, added min-h-full and massive bottom padding (pb-40) to clear the player
     <div className="min-h-full w-full flex flex-col items-center justify-center p-4 pb-32 md:pb-48">
 
       <div className="w-full max-w-3xl animate-in fade-in zoom-in duration-500">
@@ -130,7 +215,7 @@ export default function UploadPage() {
         <div className="mb-6 flex items-center justify-between px-2">
           <div>
               <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Upload Track</h1>
-              <p className="text-gray-500 text-sm mt-1">Add new music to your library.</p>
+              <p className="text-gray-500 text-sm mt-1">Import from Firebase or add manually.</p>
           </div>
           <div className="hidden md:flex p-3 bg-indigo-50 rounded-full text-indigo-600 shadow-sm border border-indigo-100">
               <Disc size={24} className={loading ? "animate-spin-slow" : ""} />
@@ -150,132 +235,159 @@ export default function UploadPage() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className={`p-6 md:p-8 space-y-6 ${loading ? "opacity-75 pointer-events-none" : ""}`}>
+          <div className="p-6 md:p-8 space-y-8">
 
-            {/* Row 1: Title & Artist */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold uppercase text-gray-500 tracking-wider">Track Title</label>
-                <input
-                  required
-                  type="text"
-                  placeholder="e.g. Midnight City"
-                  className="w-full px-4 py-2.5 rounded-lg bg-gray-50 border border-gray-200 focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all outline-none font-medium text-gray-900 placeholder:text-gray-400"
-                  value={formData.name}
-                  onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-bold uppercase text-gray-500 tracking-wider">Artist</label>
-                <input
-                  required
-                  type="text"
-                  placeholder="e.g. M83"
-                  className="w-full px-4 py-2.5 rounded-lg bg-gray-50 border border-gray-200 focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all outline-none font-medium text-gray-900 placeholder:text-gray-400"
-                  value={formData.artist}
-                  onChange={(e) => setFormData({ ...formData, artist: e.target.value })}
-                />
-              </div>
+            {/* --- FIREBASE IMPORT SECTION --- */}
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
+                 <label className="text-xs font-bold uppercase text-slate-500 tracking-wider flex items-center gap-2">
+                    <Database size={12} /> Import from Firebase
+                 </label>
+                 <div className="flex gap-2">
+                    <input
+                        type="text"
+                        value={firebaseId}
+                        onChange={(e) => setFirebaseId(e.target.value)}
+                        placeholder="Paste Music ID (e.g. -Nkc8...)"
+                        className="flex-1 px-4 py-2 rounded-lg border border-slate-300 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-200 outline-none text-sm font-mono"
+                    />
+                    <button
+                        onClick={handleFetchFromFirebase}
+                        disabled={fetchingId || loading}
+                        className="bg-slate-800 text-white px-4 py-2 rounded-lg font-bold text-sm hover:bg-slate-900 disabled:opacity-50 flex items-center gap-2 transition-colors"
+                    >
+                        {fetchingId ? <Loader2 size={16} className="animate-spin" /> : <Search size={16} />}
+                        Fetch
+                    </button>
+                 </div>
             </div>
 
-            {/* Row 2: Mood Selection Buttons */}
-            <div className="space-y-2">
-                <label className="text-xs font-bold uppercase text-gray-500 tracking-wider">Vibe / Mood</label>
-                <div className="flex flex-wrap gap-2">
-                    {moods.map((m) => (
-                        <button
-                            key={m}
-                            type="button" // Prevent form submission
-                            onClick={() => setFormData({ ...formData, mood: m })}
-                            className={`px-4 py-2 rounded-full text-sm font-semibold transition-all border
-                                ${formData.mood === m
-                                    ? "bg-indigo-600 text-white border-indigo-600 shadow-md transform scale-105"
-                                    : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100 hover:border-gray-300"
-                                }
-                            `}
-                        >
-                            {m}
-                        </button>
-                    ))}
+            <form onSubmit={handleSubmit} className={`space-y-6 ${loading ? "opacity-75 pointer-events-none" : ""}`}>
+
+                {/* Row 1: Title & Artist */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                <div className="space-y-1.5">
+                    <label className="text-xs font-bold uppercase text-gray-500 tracking-wider">Track Title</label>
+                    <input
+                    required
+                    type="text"
+                    placeholder="e.g. Midnight City"
+                    className="w-full px-4 py-2.5 rounded-lg bg-gray-50 border border-gray-200 focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all outline-none font-medium text-gray-900 placeholder:text-gray-400"
+                    value={formData.name}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                    />
                 </div>
-            </div>
 
-            {/* Row 3: Cover URL */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-bold uppercase text-gray-500 tracking-wider">Cover Image URL</label>
-              <div className="relative group">
-                <ImageIcon className="absolute left-3 top-2.5 text-gray-400 group-focus-within:text-indigo-500 transition-colors" size={18} />
-                <input
-                  required
-                  type="url"
-                  placeholder="https://..."
-                  className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-gray-50 border border-gray-200 focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all outline-none text-sm text-gray-900 placeholder:text-gray-400"
-                  value={formData.coverUrl}
-                  onChange={(e) => setFormData({ ...formData, coverUrl: e.target.value })}
-                />
-              </div>
-            </div>
+                <div className="space-y-1.5">
+                    <label className="text-xs font-bold uppercase text-gray-500 tracking-wider">Artist</label>
+                    <input
+                    required
+                    type="text"
+                    placeholder="e.g. M83"
+                    className="w-full px-4 py-2.5 rounded-lg bg-gray-50 border border-gray-200 focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all outline-none font-medium text-gray-900 placeholder:text-gray-400"
+                    value={formData.artist}
+                    onChange={(e) => setFormData({ ...formData, artist: e.target.value })}
+                    />
+                </div>
+                </div>
 
-            {/* Row 4: Audio URL */}
-            <div className="space-y-1.5">
-              <div className="flex justify-between items-end">
-                <label className="text-xs font-bold uppercase text-gray-500 tracking-wider">Audio File URL</label>
-                {status === 'ready' && (
-                  <span className="text-green-600 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 bg-green-50 px-2 py-0.5 rounded-full ring-1 ring-green-100">
-                    <CheckCircle size={10}/> Ready ({Math.floor(duration / 60)}:{(Math.floor(duration % 60)).toString().padStart(2, '0')})
-                  </span>
-                )}
-              </div>
-
-              <div className="relative group">
-                <Music className="absolute left-3 top-2.5 text-gray-400 group-focus-within:text-indigo-500 transition-colors" size={18} />
-                <input
-                  required
-                  type="url"
-                  placeholder="https://storage.com/song.mp3"
-                  className={`w-full pl-10 pr-4 py-2.5 rounded-lg bg-gray-50 border focus:bg-white focus:ring-4 transition-all outline-none text-sm text-gray-900 placeholder:text-gray-400
-                    ${status === 'ready'
-                        ? 'border-green-200 focus:border-green-500 focus:ring-green-500/10'
-                        : 'border-gray-200 focus:border-indigo-500 focus:ring-indigo-500/10'
-                    }
-                  `}
-                  value={formData.fileUrl}
-                  onChange={(e) => handleFileUrlChange(e.target.value)}
-                />
-
-                {status === "validating" && (
-                    <div className="absolute right-3 top-2.5">
-                        <Loader2 size={18} className="animate-spin text-indigo-600"/>
+                {/* Row 2: Mood Selection Buttons */}
+                <div className="space-y-2">
+                    <label className="text-xs font-bold uppercase text-gray-500 tracking-wider">Vibe / Mood</label>
+                    <div className="flex flex-wrap gap-2">
+                        {moods.map((m) => (
+                            <button
+                                key={m}
+                                type="button"
+                                onClick={() => setFormData({ ...formData, mood: m })}
+                                className={`px-4 py-2 rounded-full text-sm font-semibold transition-all border
+                                    ${formData.mood === m
+                                        ? "bg-indigo-600 text-white border-indigo-600 shadow-md transform scale-105"
+                                        : "bg-gray-50 text-gray-600 border-gray-200 hover:bg-gray-100 hover:border-gray-300"
+                                    }
+                                `}
+                            >
+                                {m}
+                            </button>
+                        ))}
                     </div>
-                )}
-              </div>
-            </div>
+                </div>
 
-            {/* Submit Button */}
-            <div className="pt-2">
-              <button
-                type="submit"
-                disabled={loading || status !== "ready"}
-                className={`w-full py-3.5 rounded-xl font-bold text-white transition-all transform duration-200 flex items-center justify-center gap-2 shadow-sm
-                  ${loading || status !== "ready"
-                      ? "bg-gray-100 text-gray-400 cursor-not-allowed shadow-none"
-                      : "bg-indigo-600 hover:bg-indigo-700 hover:shadow-indigo-200 hover:shadow-lg active:scale-[0.99]"
-                  }
-                `}
-              >
-                {loading ? (
-                  <span className="text-sm font-medium">Processing... {progress}%</span>
-                ) : (
-                  <>
-                    <Upload size={18} />
-                    <span className="text-sm font-medium">Upload Track</span>
-                  </>
-                )}
-              </button>
-            </div>
+                {/* Row 3: Cover URL */}
+                <div className="space-y-1.5">
+                <label className="text-xs font-bold uppercase text-gray-500 tracking-wider">Cover Image URL</label>
+                <div className="relative group">
+                    <ImageIcon className="absolute left-3 top-2.5 text-gray-400 group-focus-within:text-indigo-500 transition-colors" size={18} />
+                    <input
+                    required
+                    type="url"
+                    placeholder="https://..."
+                    className="w-full pl-10 pr-4 py-2.5 rounded-lg bg-gray-50 border border-gray-200 focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 transition-all outline-none text-sm text-gray-900 placeholder:text-gray-400"
+                    value={formData.coverUrl}
+                    onChange={(e) => setFormData({ ...formData, coverUrl: e.target.value })}
+                    />
+                </div>
+                </div>
 
-          </form>
+                {/* Row 4: Audio URL */}
+                <div className="space-y-1.5">
+                <div className="flex justify-between items-end">
+                    <label className="text-xs font-bold uppercase text-gray-500 tracking-wider">Audio File URL</label>
+                    {status === 'ready' && (
+                    <span className="text-green-600 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 bg-green-50 px-2 py-0.5 rounded-full ring-1 ring-green-100">
+                        <CheckCircle size={10}/> Ready ({Math.floor(duration / 60)}:{(Math.floor(duration % 60)).toString().padStart(2, '0')})
+                    </span>
+                    )}
+                </div>
+
+                <div className="relative group">
+                    <Music className="absolute left-3 top-2.5 text-gray-400 group-focus-within:text-indigo-500 transition-colors" size={18} />
+                    <input
+                    required
+                    type="url"
+                    placeholder="https://storage.com/song.mp3"
+                    className={`w-full pl-10 pr-4 py-2.5 rounded-lg bg-gray-50 border focus:bg-white focus:ring-4 transition-all outline-none text-sm text-gray-900 placeholder:text-gray-400
+                        ${status === 'ready'
+                            ? 'border-green-200 focus:border-green-500 focus:ring-green-500/10'
+                            : 'border-gray-200 focus:border-indigo-500 focus:ring-indigo-500/10'
+                        }
+                    `}
+                    value={formData.fileUrl}
+                    onChange={(e) => handleFileUrlChange(e.target.value)}
+                    />
+
+                    {status === "validating" && (
+                        <div className="absolute right-3 top-2.5">
+                            <Loader2 size={18} className="animate-spin text-indigo-600"/>
+                        </div>
+                    )}
+                </div>
+                </div>
+
+                {/* Submit Button */}
+                <div className="pt-2">
+                <button
+                    type="submit"
+                    disabled={loading || status !== "ready"}
+                    className={`w-full py-3.5 rounded-xl font-bold text-white transition-all transform duration-200 flex items-center justify-center gap-2 shadow-sm
+                    ${loading || status !== "ready"
+                        ? "bg-gray-100 text-gray-400 cursor-not-allowed shadow-none"
+                        : "bg-indigo-600 hover:bg-indigo-700 hover:shadow-indigo-200 hover:shadow-lg active:scale-[0.99]"
+                    }
+                    `}
+                >
+                    {loading ? (
+                    <span className="text-sm font-medium">Processing... {progress}%</span>
+                    ) : (
+                    <>
+                        <Upload size={18} />
+                        <span className="text-sm font-medium">Upload Track</span>
+                    </>
+                    )}
+                </button>
+                </div>
+
+            </form>
+          </div>
         </div>
       </div>
     </div>

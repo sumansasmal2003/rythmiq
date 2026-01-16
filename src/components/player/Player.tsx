@@ -19,6 +19,8 @@ import {
 import { formatDuration } from "@/lib/utils";
 import { ArtistList } from "@/components/ArtistList";
 import { LyricsPanel } from "@/components/LyricsPanel";
+// Import the new Visualizer component
+import { AudioVisualizer } from "./AudioVisualizer";
 
 export function Player() {
   const {
@@ -35,10 +37,10 @@ export function Player() {
 
   const audioRef = useRef<HTMLAudioElement>(null);
 
-  // REMOVED: Fade interval ref and constants
-  // const fadeIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  // const FADE_DURATION = 800;
-  // const FADE_STEPS = 20;
+  // --- VISUALIZER STATE ---
+  const [analyser, setAnalyser] = useState<AnalyserNode | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
 
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
@@ -47,7 +49,36 @@ export function Player() {
   const [isFullScreen, setIsFullScreen] = useState(false);
   const [showLyrics, setShowLyrics] = useState(false);
 
-  // --- 1. MEDIA SESSION API (LOCK SCREEN CONTROLS) ---
+  // --- 1. SETUP AUDIO GRAPH (VISUALIZER) ---
+  useEffect(() => {
+    if (!audioRef.current) return;
+
+    // Initialize AudioContext only when playing starts (browser policy requires user gesture)
+    if (isPlaying && !audioContextRef.current) {
+        // Cross-browser support
+        const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+        const ctx = new AudioContext();
+        const anal = ctx.createAnalyser();
+
+        // Create source from the existing <audio> element
+        const source = ctx.createMediaElementSource(audioRef.current);
+
+        // Connect: Source -> Analyser -> Destination (Speakers)
+        source.connect(anal);
+        anal.connect(ctx.destination);
+
+        audioContextRef.current = ctx;
+        sourceRef.current = source;
+        setAnalyser(anal);
+    }
+
+    // Resume context if suspended (common browser fix)
+    if (isPlaying && audioContextRef.current?.state === "suspended") {
+        audioContextRef.current.resume();
+    }
+  }, [isPlaying]);
+
+  // --- 2. MEDIA SESSION API ---
   useEffect(() => {
     if (!activeSong || !('mediaSession' in navigator)) return;
 
@@ -57,9 +88,6 @@ export function Player() {
       artwork: [
         { src: activeSong.coverUrl, sizes: '96x96', type: 'image/jpeg' },
         { src: activeSong.coverUrl, sizes: '128x128', type: 'image/jpeg' },
-        { src: activeSong.coverUrl, sizes: '192x192', type: 'image/jpeg' },
-        { src: activeSong.coverUrl, sizes: '256x256', type: 'image/jpeg' },
-        { src: activeSong.coverUrl, sizes: '384x384', type: 'image/jpeg' },
         { src: activeSong.coverUrl, sizes: '512x512', type: 'image/jpeg' },
       ]
     });
@@ -80,32 +108,26 @@ export function Player() {
   }, [activeSong, setIsPlaying, playPrevious, playNext]);
 
 
-  // --- 2. AUDIO PLAYBACK LOGIC (SIMPLIFIED) ---
+  // --- 3. AUDIO PLAYBACK LOGIC ---
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio || !activeSong) return;
 
-    // Apply volume settings immediately
     audio.volume = isMuted ? 0 : volume;
 
     if (isPlaying) {
-      // Simple play attempt
       const playPromise = audio.play();
       if (playPromise !== undefined) {
         playPromise.catch(error => {
-          console.error("Playback failed (likely autoplay policy):", error);
-          // We DO NOT set isPlaying(false) here automatically, as it can cause UI flicker
-          // when switching songs rapidly. We let the user manually retry if needed.
+          console.error("Playback failed (autoplay policy):", error);
         });
       }
     } else {
       audio.pause();
     }
-  }, [isPlaying, activeSong]);
-  // Removed 'volume' and 'isMuted' from dependency array to prevent play re-triggering on volume change.
-  // Volume is handled in a separate effect below.
+  }, [isPlaying, activeSong]); // Volume handled separately below
 
-  // --- 3. SEPARATE VOLUME LOGIC ---
+  // --- 4. SEPARATE VOLUME LOGIC ---
   useEffect(() => {
     if (audioRef.current) {
       audioRef.current.volume = isMuted ? 0 : volume;
@@ -113,7 +135,7 @@ export function Player() {
   }, [volume, isMuted]);
 
 
-  // --- 4. EVENT HANDLERS ---
+  // --- 5. EVENT HANDLERS ---
   const onLoadedMetadata = () => { if (audioRef.current) setDuration(audioRef.current.duration); };
   const onTimeUpdate = () => { if (audioRef.current) setCurrentTime(audioRef.current.currentTime); };
 
@@ -137,7 +159,7 @@ export function Player() {
       <audio
         ref={audioRef}
         src={activeSong.fileUrl}
-        // IMPORTANT: autoPlay helps mobile browsers understand the intent when src changes
+        crossOrigin="anonymous" /* CRITICAL: Required for Visualizer to read frequency data */
         autoPlay={isPlaying}
         playsInline
         onLoadedMetadata={onLoadedMetadata}
@@ -151,7 +173,7 @@ export function Player() {
       {isFullScreen && (
         <div className="fixed inset-0 z-[100] bg-white flex flex-col animate-in slide-in-from-bottom-full duration-300">
 
-          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100 bg-white/50 backdrop-blur-md relative z-20">
              <button onClick={() => setIsFullScreen(false)} className="p-2 -ml-2 text-gray-500 hover:bg-gray-100 rounded-full">
                 <ChevronDown size={28} />
              </button>
@@ -164,9 +186,19 @@ export function Player() {
              </button>
           </div>
 
-          <div className="flex-1 overflow-hidden flex flex-col md:flex-row">
-             <div className="flex-1 flex flex-col items-center justify-center p-8 md:border-r border-gray-100 bg-gray-50/30">
-                <div className="relative w-full max-w-sm aspect-square shadow-2xl rounded-2xl overflow-hidden mb-8">
+          <div className="flex-1 overflow-hidden flex flex-col md:flex-row relative">
+
+             {/* LEFT: Cover Art & Visualizer */}
+             <div className="flex-1 flex flex-col items-center justify-center p-8 md:border-r border-gray-100 bg-gray-50/30 relative overflow-hidden">
+
+                {/* --- VISUALIZER COMPONENT --- */}
+                {analyser && (
+                    <div className="absolute inset-x-0 bottom-0 h-1/2 w-full z-0 pointer-events-none">
+                         <AudioVisualizer analyser={analyser} isPlaying={isPlaying} />
+                    </div>
+                )}
+
+                <div className="relative w-full max-w-sm aspect-square shadow-2xl rounded-2xl overflow-hidden mb-8 z-10 border-4 border-white">
                    <Image
                      src={activeSong.coverUrl}
                      alt={activeSong.name}
@@ -175,15 +207,17 @@ export function Player() {
                      unoptimized
                    />
                 </div>
-                <div className="text-center space-y-2">
-                   <h2 className="text-3xl md:text-4xl font-black text-gray-900 leading-tight">{activeSong.name}</h2>
+
+                <div className="text-center space-y-2 z-10 relative">
+                   <h2 className="text-3xl md:text-4xl font-black text-gray-900 leading-tight drop-shadow-sm">{activeSong.name}</h2>
                    <div className="text-lg md:text-xl text-gray-500 font-medium">
                        <ArtistList artists={activeSong.artist} />
                    </div>
                 </div>
              </div>
 
-             <div className="flex-1 flex flex-col bg-white h-full overflow-hidden">
+             {/* RIGHT: Queue List */}
+             <div className="flex-1 flex flex-col bg-white h-full overflow-hidden z-20">
                 <div className="p-4 md:p-6 border-b border-gray-100">
                     <h3 className="font-bold text-gray-900 flex items-center gap-2">
                         <ListMusic size={20} className="text-indigo-600"/> Up Next
@@ -217,7 +251,8 @@ export function Player() {
              </div>
           </div>
 
-          <div className="px-6 py-6 md:px-12 md:py-8 bg-white border-t border-gray-100">
+          {/* CONTROLS FOOTER */}
+          <div className="px-6 py-6 md:px-12 md:py-8 bg-white border-t border-gray-100 relative z-20">
              <div className="flex items-center gap-3 text-xs font-bold text-gray-400 mb-6">
                 <span className="w-10 text-right">{formatDuration(currentTime)}</span>
                 <input
@@ -248,7 +283,6 @@ export function Player() {
           </div>
         </div>
       )}
-
 
       {/* MINI PLAYER (Bottom Bar) */}
       <div

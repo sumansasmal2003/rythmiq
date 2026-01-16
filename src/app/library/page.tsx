@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import Image from "next/image";
-import { Play, Pause, Clock, Music2, BarChart3, Search, Disc } from "lucide-react";
+import { Play, Pause, Clock, Music2, Disc, Loader2 } from "lucide-react";
 import { formatDuration } from "@/lib/utils";
 import { usePlayer } from "@/lib/store";
 import { ArtistList } from "@/components/ArtistList";
@@ -14,32 +14,79 @@ interface Song {
   coverUrl: string;
   fileUrl: string;
   duration: number;
-  blurDataUrl?: string;
+  mood?: string;
   createdAt: string;
 }
 
 export default function LibraryPage() {
   const [songs, setSongs] = useState<Song[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(true); // Initial page load
+  const [fetchingMore, setFetchingMore] = useState(false); // Background scroll load
+  const [hasMore, setHasMore] = useState(true);
+  const [page, setPage] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
 
-  const { setActiveSong, activeSong, isPlaying, setQueue, playSmart } = usePlayer();
+  // Ref for the "scroll trigger" element at the bottom
+  const observerTarget = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    async function fetchSongs() {
+  const { setActiveSong, activeSong, isPlaying, playSmart } = usePlayer();
+
+  // Function to fetch data
+  const fetchSongs = useCallback(async (pageNum: number) => {
       try {
-        const res = await fetch("/api/songs");
+        const res = await fetch(`/api/songs?page=${pageNum}&limit=20`);
         const data = await res.json();
+
         if (data.songs) {
-            setSongs(data.songs);
+            setSongs((prev) => {
+                // If page 1, replace. If page > 1, append.
+                if (pageNum === 1) return data.songs;
+                // Avoid duplicates using Set (safety check)
+                const existingIds = new Set(prev.map(s => s._id));
+                const newUniqueSongs = data.songs.filter((s: Song) => !existingIds.has(s._id));
+                return [...prev, ...newUniqueSongs];
+            });
+            setHasMore(data.hasMore);
+            setTotalCount(data.total);
         }
       } catch (error) {
         console.error("Failed to fetch library", error);
       } finally {
         setLoading(false);
+        setFetchingMore(false);
       }
-    }
-    fetchSongs();
   }, []);
+
+  // 1. Initial Load
+  useEffect(() => {
+    fetchSongs(1);
+  }, [fetchSongs]);
+
+  // 2. Infinite Scroll Observer
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasMore && !fetchingMore && !loading) {
+          setFetchingMore(true);
+          const nextPage = page + 1;
+          setPage(nextPage);
+          fetchSongs(nextPage);
+        }
+      },
+      { threshold: 1.0 }
+    );
+
+    if (observerTarget.current) {
+      observer.observe(observerTarget.current);
+    }
+
+    return () => {
+      if (observerTarget.current) {
+        observer.unobserve(observerTarget.current);
+      }
+    };
+  }, [hasMore, fetchingMore, loading, page, fetchSongs]);
+
 
   const handlePlay = (song: Song) => {
     playSmart(song);
@@ -66,7 +113,7 @@ export default function LibraryPage() {
             <div className="flex items-center justify-center md:justify-start gap-4 text-gray-500 font-medium text-sm mt-2">
               <div className="flex items-center gap-1">
                  <Disc size={16} />
-                 <span className="font-bold text-gray-900">{songs.length}</span> songs
+                 <span className="font-bold text-gray-900">{totalCount}</span> songs
               </div>
               <span className="w-1 h-1 bg-gray-300 rounded-full" />
               <span>Personal Playlist</span>
@@ -90,88 +137,91 @@ export default function LibraryPage() {
 
         {/* Content */}
         <div className="py-2">
-            {loading ? (
-            <LibrarySkeleton />
+            {loading && songs.length === 0 ? (
+                <LibrarySkeleton />
             ) : songs.length === 0 ? (
-            <EmptyState />
+                <EmptyState />
             ) : (
-            <div className="space-y-1">
-                {songs.map((song, index) => {
-                const isActive = isCurrentSong(song._id);
-                const isPlayingActive = isActive && isPlaying;
+                <div className="space-y-1">
+                    {songs.map((song, index) => {
+                    const isActive = isCurrentSong(song._id);
+                    const isPlayingActive = isActive && isPlaying;
 
-                return (
-                    <div
-                    key={song._id}
-                    onClick={() => handlePlay(song)}
-                    className={`group grid grid-cols-[auto_1fr_auto] md:grid-cols-[auto_4fr_3fr_auto] gap-4 items-center px-4 py-3 rounded-lg cursor-pointer transition-all duration-200
-                        ${isActive
-                        ? "bg-indigo-50 shadow-sm"
-                        : "hover:bg-gray-50 hover:shadow-sm"
-                        }
-                    `}
-                    >
-                    {/* 1. Index / Play Btn */}
-                    <div className="w-8 flex justify-center text-gray-400 font-medium text-sm">
-                        {/* Static Index */}
-                        <span className={`group-hover:hidden ${isActive ? "hidden" : "block"}`}>
-                           {index + 1}
-                        </span>
+                    return (
+                        <div
+                        key={song._id}
+                        onClick={() => handlePlay(song)}
+                        className={`group grid grid-cols-[auto_1fr_auto] md:grid-cols-[auto_4fr_3fr_auto] gap-4 items-center px-4 py-3 rounded-lg cursor-pointer transition-all duration-200
+                            ${isActive
+                            ? "bg-indigo-50 shadow-sm"
+                            : "hover:bg-gray-50 hover:shadow-sm"
+                            }
+                        `}
+                        >
+                        {/* 1. Index / Play Btn */}
+                        <div className="w-8 flex justify-center text-gray-400 font-medium text-sm">
+                            <span className={`group-hover:hidden ${isActive ? "hidden" : "block"}`}>
+                            {index + 1}
+                            </span>
 
-                        {/* Active State (Bars or Number) */}
-                        {isActive && isPlaying && (
-                             <div className="flex items-end gap-[2px] h-4 block group-hover:hidden">
-                                <div className="w-1 bg-indigo-600 animate-music-bar-1 h-full" />
-                                <div className="w-1 bg-indigo-600 animate-music-bar-2 h-full" />
-                                <div className="w-1 bg-indigo-600 animate-music-bar-3 h-full" />
-                            </div>
-                        )}
-                        {isActive && !isPlaying && (
-                             <span className="text-indigo-600 font-bold block group-hover:hidden">{index + 1}</span>
-                        )}
+                            {isActive && isPlaying && (
+                                <div className="flex items-end gap-[2px] h-4 block group-hover:hidden">
+                                    <div className="w-1 bg-indigo-600 animate-music-bar-1 h-full" />
+                                    <div className="w-1 bg-indigo-600 animate-music-bar-2 h-full" />
+                                    <div className="w-1 bg-indigo-600 animate-music-bar-3 h-full" />
+                                </div>
+                            )}
+                            {isActive && !isPlaying && (
+                                <span className="text-indigo-600 font-bold block group-hover:hidden">{index + 1}</span>
+                            )}
 
-                        {/* Hover Play Icon */}
-                        <span className={`hidden group-hover:block ${isActive ? "text-indigo-600" : "text-gray-800"}`}>
-                        {isPlayingActive ? <Pause size={18} fill="currentColor"/> : <Play size={18} fill="currentColor"/>}
-                        </span>
-                    </div>
-
-                    {/* 2. Title & Art */}
-                    <div className="flex items-center gap-4 min-w-0">
-                        <div className="relative w-11 h-11 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0 shadow-sm group-hover:shadow-md transition-all">
-                        <Image
-                            src={song.coverUrl}
-                            alt={song.name}
-                            fill
-                            className="object-cover"
-                            unoptimized // Security Feature
-                        />
+                            <span className={`hidden group-hover:block ${isActive ? "text-indigo-600" : "text-gray-800"}`}>
+                            {isPlayingActive ? <Pause size={18} fill="currentColor"/> : <Play size={18} fill="currentColor"/>}
+                            </span>
                         </div>
-                        <div className="min-w-0">
-                        <h3 className={`font-semibold truncate text-sm md:text-base ${isActive ? "text-indigo-600" : "text-gray-900"}`}>
-                            {song.name}
-                        </h3>
-                        {/* Mobile: Artist shows below title */}
-                        <div className="md:hidden text-xs text-gray-500 truncate mt-0.5">
+
+                        {/* 2. Title & Art */}
+                        <div className="flex items-center gap-4 min-w-0">
+                            <div className="relative w-11 h-11 rounded-lg overflow-hidden bg-gray-100 flex-shrink-0 shadow-sm group-hover:shadow-md transition-all">
+                            <Image
+                                src={song.coverUrl}
+                                alt={song.name}
+                                fill
+                                className="object-cover"
+                                unoptimized
+                            />
+                            </div>
+                            <div className="min-w-0">
+                            <h3 className={`font-semibold truncate text-sm md:text-base ${isActive ? "text-indigo-600" : "text-gray-900"}`}>
+                                {song.name}
+                            </h3>
+                            <div className="md:hidden text-xs text-gray-500 truncate mt-0.5">
+                                <ArtistList artists={song.artist} />
+                            </div>
+                            </div>
+                        </div>
+
+                        {/* 3. Artist (Desktop Only) */}
+                        <div className="hidden md:flex text-sm text-gray-500 font-medium items-center gap-2 truncate group-hover:text-gray-900 transition-colors">
                             <ArtistList artists={song.artist} />
                         </div>
+
+                        {/* 4. Duration */}
+                        <div className="text-sm text-gray-400 font-medium tabular-nums text-right pr-2">
+                            {formatDuration(song.duration)}
                         </div>
-                    </div>
 
-                    {/* 3. Artist (Desktop Only) */}
-                    <div className="hidden md:flex text-sm text-gray-500 font-medium items-center gap-2 truncate group-hover:text-gray-900 transition-colors">
-                        <ArtistList artists={song.artist} />
-                    </div>
+                        </div>
+                    );
+                    })}
 
-                    {/* 4. Duration */}
-                    <div className="text-sm text-gray-400 font-medium tabular-nums text-right pr-2">
-                        {formatDuration(song.duration)}
-                    </div>
-
-                    </div>
-                );
-                })}
-            </div>
+                    {/* Infinite Scroll Trigger */}
+                    {hasMore && (
+                        <div ref={observerTarget} className="flex justify-center py-6">
+                             <Loader2 className="animate-spin text-indigo-600" />
+                        </div>
+                    )}
+                </div>
             )}
         </div>
       </div>

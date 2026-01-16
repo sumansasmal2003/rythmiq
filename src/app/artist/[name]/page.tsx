@@ -2,7 +2,7 @@
 
 import { useEffect, useState, use } from "react";
 import Image from "next/image";
-import { Play, Pause, Mic2, ArrowLeft, Clock, CheckCircle2, Music, UserPlus, MoreHorizontal } from "lucide-react";
+import { Play, Pause, ArrowLeft, Clock, CheckCircle2, Music, MoreHorizontal } from "lucide-react";
 import { formatDuration } from "@/lib/utils";
 import { usePlayer } from "@/lib/store";
 import { useRouter } from "next/navigation";
@@ -33,14 +33,19 @@ export default function ArtistPage({ params }: { params: Promise<{ name: string 
   useEffect(() => {
     async function fetchArtistSongs() {
       try {
-        const res = await fetch("/api/songs");
+        const res = await fetch("/api/songs?limit=1000"); // Fetch ample songs to filter client-side
         const data = await res.json();
 
         if (data.songs) {
-          // Filter songs where ANY of the artists match
-          const artistSongs = data.songs.filter((s: Song) =>
-            s.artist.some(a => a.toLowerCase() === artistName.toLowerCase())
-          );
+          // --- UPDATED FILTER LOGIC ---
+          const artistSongs = data.songs.filter((s: Song) => {
+             // 1. Join all parts: ["Drake, Future", "21 Savage"] -> "Drake, Future, 21 Savage"
+             // 2. Split by comma -> ["Drake", "Future", "21 Savage"]
+             // 3. Check if ANY part matches the current page artist
+             const allArtists = s.artist.join(",").split(",").map(a => a.trim().toLowerCase());
+             return allArtists.includes(artistName.toLowerCase());
+          });
+
           setSongs(artistSongs);
         }
       } catch (error) {
@@ -62,7 +67,7 @@ export default function ArtistPage({ params }: { params: Promise<{ name: string 
     }
   };
 
-  // Generate a random "Monthly Listeners" count based on name length for demo consistency
+  // Generate random listeners count for demo
   const listeners = (artistName.length * 842193).toLocaleString();
 
   if (loading) return <ArtistSkeleton />;
@@ -70,7 +75,7 @@ export default function ArtistPage({ params }: { params: Promise<{ name: string 
   return (
     <div className="min-h-screen bg-white pb-32">
 
-      {/* 1. Immersive Hero Section */}
+      {/* Hero Section */}
       <div className="relative w-full h-[45vh] min-h-[340px] bg-gradient-to-b from-slate-800 via-gray-900 to-black overflow-hidden flex flex-col justify-end p-6 md:p-10 text-white">
 
         {/* Abstract Background Art */}
@@ -79,7 +84,6 @@ export default function ArtistPage({ params }: { params: Promise<{ name: string 
              <div className="absolute top-[20%] right-[0%] w-[80%] h-[80%] bg-blue-600 rounded-full blur-[120px] mix-blend-screen opacity-10" />
         </div>
 
-        {/* Back Button */}
         <button
           onClick={() => router.back()}
           className="absolute top-6 left-6 p-2 bg-black/20 hover:bg-black/40 text-white rounded-full backdrop-blur-md transition-all z-20"
@@ -88,12 +92,12 @@ export default function ArtistPage({ params }: { params: Promise<{ name: string 
         </button>
 
         <div className="relative z-10 flex flex-col md:flex-row items-end gap-6 md:gap-8">
-            {/* Artist Avatar (Circle) */}
+            {/* Avatar */}
             <div className="w-32 h-32 md:w-48 md:h-48 rounded-full border-4 border-white/10 shadow-2xl overflow-hidden bg-gray-800 flex items-center justify-center flex-shrink-0 relative group">
                 {songs.length > 0 ? (
                     <Image src={songs[0].coverUrl} alt={artistName} fill className="object-cover" />
                 ) : (
-                    <Mic2 size={48} className="text-gray-400" />
+                    <Music size={48} className="text-gray-400" />
                 )}
             </div>
 
@@ -112,7 +116,7 @@ export default function ArtistPage({ params }: { params: Promise<{ name: string 
         </div>
       </div>
 
-      {/* 2. Sticky Action Bar */}
+      {/* Action Bar */}
       <div className="sticky top-0 z-30 bg-white/95 backdrop-blur-xl border-b border-gray-100 px-6 md:px-10 py-4 flex items-center gap-4 shadow-sm transition-all">
          <button
             onClick={handlePlayAll}
@@ -142,11 +146,10 @@ export default function ArtistPage({ params }: { params: Promise<{ name: string 
          </button>
       </div>
 
-      {/* 3. Popular Songs List */}
+      {/* Songs List */}
       <div className="px-2 md:px-6 lg:px-10 py-8 max-w-7xl mx-auto">
         <h2 className="text-xl font-bold text-gray-900 mb-6 px-4">Popular</h2>
 
-        {/* Table Header */}
         <div className="grid grid-cols-[auto_1fr_auto] md:grid-cols-[auto_4fr_3fr_auto] gap-4 px-4 py-2 text-xs font-bold text-gray-400 border-b border-gray-100 mb-2 uppercase tracking-wider">
             <div className="w-8 text-center">#</div>
             <div>Title</div>
@@ -163,7 +166,6 @@ export default function ArtistPage({ params }: { params: Promise<{ name: string 
             ) : (
                 songs.map((song, index) => {
                     const isActive = isCurrentSong(song._id);
-                    // Fake play count logic for demo
                     const plays = ((songs.length - index) * 123456 + 50000).toLocaleString();
 
                     return (
@@ -174,7 +176,6 @@ export default function ArtistPage({ params }: { params: Promise<{ name: string 
                                 ${isActive ? "bg-indigo-50" : "hover:bg-gray-100"}
                             `}
                         >
-                            {/* 1. Number / Play Icon */}
                             <div className="w-8 flex justify-center text-sm font-medium text-gray-500 relative">
                                 {isActive && isPlaying ? (
                                     <div className="flex items-end gap-[2px] h-4">
@@ -190,7 +191,6 @@ export default function ArtistPage({ params }: { params: Promise<{ name: string 
                                 )}
                             </div>
 
-                            {/* 2. Title & Art */}
                             <div className="flex items-center gap-4 min-w-0">
                                 <div className="relative w-10 h-10 rounded overflow-hidden bg-gray-200 flex-shrink-0 shadow-sm group-hover:shadow-md transition-all">
                                     <Image src={song.coverUrl} alt={song.name} fill className="object-cover" unoptimized />
@@ -199,16 +199,17 @@ export default function ArtistPage({ params }: { params: Promise<{ name: string 
                                     <h3 className={`font-semibold truncate text-[15px] ${isActive ? "text-indigo-600" : "text-gray-900"}`}>
                                         {song.name}
                                     </h3>
-                                    {/* Show explicit badge if needed (optional) */}
+                                    {/* Using ArtistList to handle display properly */}
+                                    <div className="md:hidden text-xs text-gray-500 truncate mt-0.5">
+                                        <ArtistList artists={song.artist} />
+                                    </div>
                                 </div>
                             </div>
 
-                            {/* 3. Plays (Desktop Only) */}
-                            <div className="hidden md:block text-sm text-gray-500 font-medium tabular-nums">
-                                {plays}
+                            <div className="hidden md:block text-sm text-gray-500 font-medium truncate">
+                                <ArtistList artists={song.artist} />
                             </div>
 
-                            {/* 4. Duration */}
                             <div className="text-sm text-gray-400 font-medium tabular-nums text-right pr-2">
                                 {formatDuration(song.duration)}
                             </div>
