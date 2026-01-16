@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Library, PlusCircle, Settings, Music2, Search } from "lucide-react";
+import { Home, Library, PlusCircle, Settings, Music2, Search, Mic2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function Sidebar() {
@@ -11,6 +11,7 @@ export function Sidebar() {
   const routes = [
     { label: "Home", icon: Home, href: "/" },
     { label: "Search", icon: Search, href: "/search" },
+    { label: "Artists", icon: Mic2, href: "/artists" },
     { label: "Library", icon: Library, href: "/library" },
     { label: "Upload Track", icon: PlusCircle, href: "/upload" },
     { label: "Settings", icon: Settings, href: "/settings" },

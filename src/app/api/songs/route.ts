@@ -3,11 +3,12 @@ import dbConnect from "@/lib/db";
 import mongoose from "mongoose";
 
 // Define Schema if not already in a separate file
+// (Ideally, keep this in src/models/Song.ts, but we keep your structure here)
 const SongSchema = new mongoose.Schema({
   name: String,
   artist: [String],
   coverUrl: String,
-  fileUrl: String, // We keep this in DB, but won't send it to client
+  fileUrl: String,
   duration: Number,
   mood: String,
   createdAt: { type: Date, default: Date.now },
@@ -15,12 +16,27 @@ const SongSchema = new mongoose.Schema({
 
 const Song = mongoose.models.Song || mongoose.model("Song", SongSchema);
 
-export async function GET() {
+export async function GET(req: Request) {
   await dbConnect();
-  try {
-    const songs = await Song.find({}).sort({ createdAt: -1 });
 
-    // TRANSFORM DATA: Hide 'fileUrl', replace with proxy URL
+  try {
+    // 1. Get Pagination Query Params
+    const { searchParams } = new URL(req.url);
+    const page = parseInt(searchParams.get("page") || "1");
+    const limit = parseInt(searchParams.get("limit") || "20"); // Fetch 20 at a time
+    const skip = (page - 1) * limit;
+
+    // 2. Fetch only the requested chunk
+    const songs = await Song.find({})
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+
+    // 3. Check if there are more songs to load
+    const totalSongs = await Song.countDocuments();
+    const hasMore = skip + songs.length < totalSongs;
+
+    // 4. Transform Data
     const safeSongs = songs.map((song) => ({
       _id: song._id,
       name: song.name,
@@ -28,11 +44,15 @@ export async function GET() {
       coverUrl: `/api/cover/${song._id}`,
       duration: song.duration,
       mood: song.mood,
-      // The Magic: The frontend sees this, NOT the real dropbox/storage link
       fileUrl: `/api/stream/${song._id}`,
     }));
 
-    return NextResponse.json({ songs: safeSongs });
+    return NextResponse.json({
+        songs: safeSongs,
+        hasMore,
+        total: totalSongs
+    });
+
   } catch (error) {
     return NextResponse.json({ error: "Failed to fetch songs" }, { status: 500 });
   }
